@@ -5,7 +5,7 @@
 
 void SPI_SendByte() {
     //while (!(UCA0IFG & UCTXIFG)); // Wait until TX buffer is ready
-    UCA0TXBUF = 0X02;             // Transmit byte
+    UCA0TXBUF = 0x01;             // Transmit byte
 }
 
 int main(void) {
@@ -17,11 +17,16 @@ int main(void) {
 
         // Configure USCI_A0 for SPI
         UCA0CTL0 = UCCKPH | UCMSB | UCMST | UCSYNC; // Clock phase, MSB first, Master mode, Synchronous mode
-        UCA0CTL1 |= UCSSEL__SMCLK;                 // Select SMCLK as clock source
-        UCA0BRW = 100;                              // Set SPI clock divider (SMCLK/10 = ~100kHz)
+        UCA0CTL0 &= ~(BIT2 | BIT1);
+        UCA0CTL1 |= UCSSEL_3;                 // Select SMCLK as clock source
+        UCA0BR0= 0x00;                              // Set SPI clock divider (SMCLK/10 = ~100kHz)
+        UCA0BR1 = 0x00;
 
         // Configure SPI pins for USCI_A0
-        P3SEL |= BIT3 | BIT4 | BIT5; // P3.3 = SCLK, P3.4 = SIMO, P3.5 = SOMI
+        P3SEL |= BIT3 | BIT4 ;
+        P2SEL |= BIT7;// P3.3 = SCLK, P3.4 = SIMO, P3.5 = SOMI
+        P3DIR |= BIT3 | BIT4;                      // P3.3 (SCLK) and P3.4 (SIMO) as outputs
+        P3DIR &= ~BIT5;
 
         // Take USCI_A0 out of reset
         UCA0CTL1 &= ~UCSWRST;
@@ -30,7 +35,10 @@ int main(void) {
 
 
     while (1) {
-        SPI_SendByte();       // Send a byte (e.g., 0x55)
-       // __delay_cycles(100);     // Simple delay
+       // SPI_SendByte(); // Send a byte (e.g., 0x55)
+
+        UCA0TXBUF = 0x01;
+
+        //__delay_cycles(0.5);     // Simple delay
     }
 }
