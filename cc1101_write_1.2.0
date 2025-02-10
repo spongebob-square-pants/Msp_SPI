@@ -1,0 +1,165 @@
+
+//changed main function as well as tx function to make it more stable. (Version 1.2)
+
+#include <msp430.h>
+#include <stdint.h>
+#include <string.h>
+
+// Define SPI pins for MSP430F5529
+#define CSN_PIN     BIT0  // P3.0 (Chip Select)
+#define SCLK_PIN    BIT7  // P2.7 (SPI Clock)
+#define MOSI_PIN    BIT3  // P3.3 (Master Out Slave In)
+#define MISO_PIN    BIT4  // P3.4 (Master In Slave Out)
+#define GDO0_PIN    BIT2  // P2.2 (General Purpose Digital Output 0)
+#define GDO2_PIN    BIT6  // P2.1 (General Purpose Digital Output 2)
+
+// CC1101 SPI Commands
+#define WRITE_SINGLE_BYTE 0x00
+#define WRITE_BURST       0x40
+#define READ_SINGLE_BYTE  0x80
+#define READ_BURST        0xC0
+#define SRES              0x30  // Reset
+#define STX               0x35  // Transmit
+#define SRX               0x34  // Receive
+#define SIDLE             0x36  // Idle
+#define SPWD              0x39  // Power Down
+#define SFTX              0x3B  // Flush TX FIFO
+#define SFRX              0x3A  // Flush RX FIFO
+#define PATABLE_BURST     0x7E  // PATable Burst Access
+
+void SPI_Init(void) {
+    // Configure SPI pins
+    P3DIR |= CSN_PIN;   // CSN as output
+    P2SEL |= SCLK_PIN;  // P2.7 as SPI clock (SCLK)
+    P3SEL |= MOSI_PIN | MISO_PIN;  // P3.3 as MOSI, P3.4 as MISO
+
+    // Configure SPI
+    UCB0CTL1 |= UCSWRST;  // Put SPI in reset mode
+    UCB0CTL0 |= UCMST | UCSYNC | UCCKPH | UCMSB;  // Master, 3-pin, 8-bit, MSB first
+    UCB0CTL1 |= UCSSEL_2;  // Use SMCLK as clock source
+    UCB0BR0 = 0x10;        // Set clock divider (SMCLK / 2)
+    UCB0BR1 = 0;
+    UCB0CTL1 &= ~UCSWRST;  // Release SPI from reset
+}
+
+void SPI_Write(uint8_t data) {
+    while (!(UCB0IFG & UCTXIFG));  // Wait for TX buffer to be ready
+    UCB0TXBUF = data;              // Send data
+}
+
+uint8_t SPI_Read(void) {
+    while (!(UCB0IFG & UCRXIFG));  // Wait for RX buffer to be ready
+    return UCB0RXBUF;              // Return received data
+}
+
+void CC1101_WriteReg(uint8_t addr, uint8_t data) {
+    P3OUT &= ~CSN_PIN;  // CSN low
+    SPI_Write(addr);    // Send address
+    SPI_Write(data);    // Send data
+    P3OUT |= CSN_PIN;   // CSN high
+}
+
+uint8_t CC1101_ReadReg(uint8_t addr) {
+    P3OUT &= ~CSN_PIN;  // CSN low
+    SPI_Write(addr | READ_SINGLE_BYTE);  // Send read command
+    uint8_t data = SPI_Read();           // Read data
+    P3OUT |= CSN_PIN;   // CSN high
+    return data;
+}
+
+void CC1101_Init(void) {
+    // Reset CC1101
+    P3OUT &= ~CSN_PIN;  // CSN low
+    SPI_Write(SRES);    // Send reset command
+    P3OUT |= CSN_PIN;   // CSN high
+    __delay_cycles(1000);  // Wait for reset to complete
+
+
+    P2DIR &= ~GDO0_PIN;  // Set GDO0 as input
+    P2DIR &= ~GDO2_PIN;  // Set GDO2 as input
+
+
+    // Configure CC1101 for 2-FSK at 900 MHz
+    CC1101_WriteReg(0x02, 0x0C);  // IOCFG2: GDO2 as output
+    CC1101_WriteReg(0x03, 0x0D);  // IOCFG1: GDO1 as output
+    CC1101_WriteReg(0x04, 0x0E);  // IOCFG0: GDO0 as output
+    CC1101_WriteReg(0x07, 0x07);  // FIFOTHR: FIFO thresholds
+    CC1101_WriteReg(0x08, 0x57);  // SYNC1: Sync word high byte
+    CC1101_WriteReg(0x09, 0x43);  // SYNC0: Sync word low byte
+    CC1101_WriteReg(0x0A, 0x3E);  // PKTLEN: Packet length
+    CC1101_WriteReg(0x0B, 0x0E);  // PKTCTRL1: Packet control
+    CC1101_WriteReg(0x0C, 0x45);  // PKTCTRL0: Packet control
+    CC1101_WriteReg(0x0D, 0xFF);  // ADDR: Device address
+    CC1101_WriteReg(0x0E, 0x00);  // CHANNR: Channel number
+    CC1101_WriteReg(0x0F, 0x08);  // FSCTRL1: Frequency synthesizer control
+    CC1101_WriteReg(0x10, 0x00);  // FSCTRL0: Frequency synthesizer control
+    CC1101_WriteReg(0x11, 0x21);  // FREQ2: Frequency control word high byte
+    CC1101_WriteReg(0x12, 0x65);  // FREQ1: Frequency control word middle byte
+    CC1101_WriteReg(0x13, 0x6A);  // FREQ0: Frequency control word low byte
+    CC1101_WriteReg(0x14, 0xF5);  // MDMCFG4: Modem configuration
+    CC1101_WriteReg(0x15, 0x83);  // MDMCFG3: Modem configuration
+    CC1101_WriteReg(0x16, 0x13);  // MDMCFG2: Modem configuration (2-FSK)
+    CC1101_WriteReg(0x17, 0xA0);  // MDMCFG1: Modem configuration
+    CC1101_WriteReg(0x18, 0xF8);  // MDMCFG0: Modem configuration
+    CC1101_WriteReg(0x19, 0x15);  // DEVIATN: Modem deviation setting
+    CC1101_WriteReg(0x1A, 0x07);  // MCSM2: Main radio control state machine
+    CC1101_WriteReg(0x1B, 0x0C);  // MCSM1: Main radio control state machine
+    CC1101_WriteReg(0x1C, 0x18);  // MCSM0: Main radio control state machine
+    CC1101_WriteReg(0x1D, 0x16);  // FOCCFG: Frequency offset compensation
+    CC1101_WriteReg(0x1E, 0x6C);  // BSCFG: Bit synchronization configuration
+    CC1101_WriteReg(0x1F, 0x03);  // AGCCTRL2: AGC control
+    CC1101_WriteReg(0x20, 0x40);  // AGCCTRL1: AGC control
+    CC1101_WriteReg(0x21, 0x91);  // AGCCTRL0: AGC control
+    CC1101_WriteReg(0x22, 0x02);  // WOREVT1: High byte event0 timeout
+    CC1101_WriteReg(0x23, 0x26);  // WOREVT0: Low byte event0 timeout
+    CC1101_WriteReg(0x24, 0x09);  // WORCTRL: Wake on radio control
+    CC1101_WriteReg(0x25, 0x56);  // FREND1: Front end RX configuration
+    CC1101_WriteReg(0x26, 0x17);  // FREND0: Front end TX configuration
+    CC1101_WriteReg(0x27, 0xA9);  // FSCAL3: Frequency synthesizer calibration
+    CC1101_WriteReg(0x28, 0x0A);  // FSCAL2: Frequency synthesizer calibration
+    CC1101_WriteReg(0x29, 0x00);  // FSCAL1: Frequency synthesizer calibration
+    CC1101_WriteReg(0x2A, 0x11);  // FSCAL0: Frequency synthesizer calibration
+    CC1101_WriteReg(0x2B, 0x41);  // RCCTRL1: RC oscillator configuration
+    CC1101_WriteReg(0x2C, 0x00);  // RCCTRL0: RC oscillator configuration
+}
+
+void CC1101_Transmit(uint8_t *data, uint8_t length) {
+    P3OUT &= ~CSN_PIN;  // CSN low
+    SPI_Write(SFTX);    // Flush TX FIFO
+    P3OUT |= CSN_PIN;   // CSN high
+
+    P3OUT &= ~CSN_PIN;  // CSN low
+    SPI_Write(0x7F | WRITE_BURST);  // Burst write to TX FIFO
+    for (int i = 0; i < length; i++) {
+        SPI_Write(data[i]);  // Write data
+    }
+    P3OUT |= CSN_PIN;  // CSN high
+
+    P3OUT &= ~CSN_PIN;  // CSN low
+    __delay_cycles(10);  // Small delay
+    SPI_Write(STX);      // Start transmission
+    __delay_cycles(10);  // Small delay
+    P3OUT |= CSN_PIN;    // CSN high
+}
+
+
+void main(void) {
+    WDTCTL = WDTPW | WDTHOLD;  // Stop watchdog timer
+
+    // Set clock to 1 MHz
+    BCSCTL1 = CALBC1_1MHZ;
+    DCOCTL = CALDCO_1MHZ;
+
+    SPI_Init();                // Initialize SPI
+    CC1101_Init();             // Initialize CC1101
+
+    printf("Register Value: 0x%02X\n", CC1101_ReadReg(0x02));
+
+    uint8_t data[] = {0x01, 0x02, 0x03, 0x04};  // Data to transmit
+    CC1101_Transmit(data, sizeof(data));        // Transmit data
+
+    // Wait for transmission to complete
+    while (!(P2IN & GDO0_PIN));  // Wait for GDO0 to go high
+
+    while (1);  // Infinite loop
+}
