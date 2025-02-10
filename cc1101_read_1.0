@@ -1,0 +1,79 @@
+
+//for read ver 1.0
+
+
+#include <msp430.h>
+#include <stdint.h>
+#include <string.h>
+
+// Define SPI pins for MSP430F5529
+#define CSN_PIN     BIT0  // P3.0 (Chip Select)
+#define SCLK_PIN    BIT7  // P2.7 (SPI Clock)
+#define MOSI_PIN    BIT3  // P3.3 (Master Out Slave In)
+#define MISO_PIN    BIT4  // P3.4 (Master In Slave Out)
+#define GDO0_PIN    BIT2  // P2.2 (General Purpose Digital Output 0)
+#define GDO2_PIN    BIT6  // P2.1 (General Purpose Digital Output 2)
+
+// CC1101 SPI Commands
+#define WRITE_SINGLE_BYTE 0x00
+#define WRITE_BURST       0x40
+#define READ_SINGLE_BYTE  0x80
+#define READ_BURST        0xC0
+#define SRES              0x30  // Reset
+#define STX               0x35  // Transmit
+#define SRX               0x34  // Receive
+#define SIDLE             0x36  // Idle
+#define SPWD              0x39  // Power Down
+#define SFTX              0x3B  // Flush TX FIFO
+#define SFRX              0x3A  // Flush RX FIFO
+#define PATABLE_BURST     0x7E  // PATable Burst Access
+
+void SPI_Init(void) {
+    // Configure SPI pins
+    P3DIR |= CSN_PIN;   // CSN as output
+    P2SEL |= SCLK_PIN;  // P2.7 as SPI clock (SCLK)
+    P3SEL |= MOSI_PIN | MISO_PIN;  // P3.3 as MOSI, P3.4 as MISO
+
+    // Configure SPI
+    UCB0CTL1 |= UCSWRST;  // Put SPI in reset mode
+    UCB0CTL0 |= UCMST | UCSYNC | UCCKPH | UCMSB;  // Master, 3-pin, 8-bit, MSB first
+    UCB0CTL1 |= UCSSEL_2;  // Use SMCLK as clock source
+    UCB0BR0 = 0x10;        // Set clock divider (SMCLK / 2)
+    UCB0BR1 = 0;
+    UCB0CTL1 &= ~UCSWRST;  // Release SPI from reset
+}
+
+void SPI_Write(uint8_t data) {
+    while (!(UCB0IFG & UCTXIFG));  // Wait for TX buffer to be ready
+    UCB0TXBUF = data;              // Send data
+}
+
+uint8_t SPI_Read(void) {
+    while (!(UCB0IFG & UCRXIFG));  // Wait for RX buffer to be ready
+    return UCB0RXBUF;              // Return received data
+}
+
+void CC1101_WriteReg(uint8_t addr, uint8_t data) {
+    P3OUT &= ~CSN_PIN;  // CSN low
+    SPI_Write(addr);    // Send address
+    SPI_Write(data);    // Send data
+    P3OUT |= CSN_PIN;   // CSN high
+}
+
+uint8_t CC1101_ReadReg(uint8_t addr) {
+    P3OUT &= ~CSN_PIN;  // CSN low
+    SPI_Write(addr | READ_SINGLE_BYTE);  // Send read command
+    uint8_t data = SPI_Read();           // Read data
+    P3OUT |= CSN_PIN;   // CSN high
+    return data;
+}
+
+
+void main(void) {
+    WDTCTL = WDTPW | WDTHOLD;  // Stop watchdog timer
+    SPI_Init();                // Initialize SPI
+
+    printf(CC1101_ReadReg(0x02));
+
+    while (1);  // Infinite loop
+}
